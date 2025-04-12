@@ -1,0 +1,419 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+  <meta charset="UTF-8">
+  <title>加币合约持仓及目标、爆仓价格计算器</title>
+  <style>
+    body { font-family: Arial, sans-serif; padding: 20px; }
+    input, select { margin: 5px; padding: 5px; }
+    table { border-collapse: collapse; margin-bottom: 20px; width: 100%; }
+    table, th, td { border: 1px solid #ddd; }
+    th, td { padding: 8px; text-align: center; }
+    .slider { width: 400px; }
+    .section { border: 1px solid #ccc; padding: 15px; margin-bottom: 20px; }
+    .section h3 { margin-top: 0; }
+    canvas { border: 1px solid #aaa; margin-top: 10px; }
+  </style>
+</head>
+<body>
+  <h2>加币合约持仓及目标、爆仓价格计算器</h2>
+
+  <div class="section">
+    <label>本金 (USDT):
+      <input type="number" id="principal" placeholder="请输入本金" oninput="updateCalculations()" />
+    </label>
+    <label>当前价格 (USDT):
+      <input type="number" id="currentPrice" placeholder="请输入当前价格" oninput="updateCalculations()" />
+    </label>
+    <label>杠杆倍数:
+      <input type="number" id="leverage" placeholder="请输入杠杆倍数" oninput="updateCalculations()" />
+    </label>
+  </div>
+
+  <div class="section">
+    <h3>持仓分档（共5档）</h3>
+    <table>
+      <thead>
+        <tr>
+          <th>档位</th>
+          <th>价格 (USDT)</th>
+          <th>数量</th>
+          <th>USDT</th>
+          <th>方向</th>
+        </tr>
+      </thead>
+      <tbody>
+        <script>
+          for (let i = 1; i <= 5; i++) {
+            document.write(`
+              <tr>
+                <td>${i}</td>
+                <td><input type="number" id="price${i}" placeholder="价格" oninput="updatePriceInput(${i})"></td>
+                <td><input type="number" id="qty${i}" placeholder="数量" oninput="updateQtyInput(${i})"></td>
+                <td><input type="number" id="usdt${i}" placeholder="USDT" oninput="updateUsdtInput(${i})"></td>
+                <td>
+                  <select id="direction${i}" onchange="updateCalculations()">
+                    <option value="long">多</option>
+                    <option value="short">空</option>
+                  </select>
+                </td>
+              </tr>
+            `);
+          }
+        </script>
+      </tbody>
+    </table>
+  </div>
+
+  <!-- 多单设置 -->
+  <div class="section" id="longSection" style="display:none;">
+    <h3>【多单】设置</h3>
+    <div id="longSummary"></div>
+    <div>
+      <label>目标盈利 (价格)：
+        <input type="number" id="longProfitPriceInput" step="0.01" style="width:100px" oninput="syncLongProfitPriceInput()" placeholder="直接输入价格" /> USDT
+      </label>
+      <label>目标盈利 (%)：
+        <input type="range" id="longProfitSlider" class="slider" min="0" max="20" step="0.1" oninput="syncLongProfitSlider()" />
+        <span id="longProfitPercLabel">0.0</span>%
+      </label>
+      <div><strong>预计盈利金额: <span id="longProfitAmount">0.00</span> USDT</strong></div>
+    </div>
+    <div>
+      <label>止损 (价格)：
+        <input type="number" id="longStopPriceInput" step="0.01" style="width:100px" oninput="syncLongStopPriceInput()" placeholder="直接输入价格" /> USDT
+      </label>
+      <label>止损 (%)：
+        <input type="range" id="longStopSlider" class="slider" min="0" max="20" step="0.1" oninput="syncLongStopSlider()" />
+        <span id="longStopPercLabel">0.0</span>%
+      </label>
+      <div><strong>预计亏损金额: <span id="longLossAmount">0.00</span> USDT</strong></div>
+    </div>
+    <p>预估爆仓价: <span id="longLiquidation"></span> USDT</p>
+    <canvas id="longChart" width="300" height="400"></canvas>
+  </div>
+
+  <!-- 空单设置 -->
+  <div class="section" id="shortSection" style="display:none;">
+    <h3>【空单】设置</h3>
+    <div id="shortSummary"></div>
+    <div>
+      <label>目标盈利 (价格)：
+        <input type="number" id="shortProfitPriceInput" step="0.01" style="width:100px" oninput="syncShortProfitPriceInput()" placeholder="直接输入价格" /> USDT
+      </label>
+      <label>目标盈利 (%)：
+        <input type="range" id="shortProfitSlider" class="slider" min="0" max="20" step="0.1" oninput="syncShortProfitSlider()" />
+        <span id="shortProfitPercLabel">0.0</span>%
+      </label>
+      <div><strong>预计盈利金额: <span id="shortProfitAmount">0.00</span> USDT</strong></div>
+    </div>
+    <div>
+      <label>止损 (价格)：
+        <input type="number" id="shortStopPriceInput" step="0.01" style="width:100px" oninput="syncShortStopPriceInput()" placeholder="直接输入价格" /> USDT
+      </label>
+      <label>止损 (%)：
+        <input type="range" id="shortStopSlider" class="slider" min="0" max="20" step="0.1" oninput="syncShortStopSlider()" />
+        <span id="shortStopPercLabel">0.0</span>%
+      </label>
+      <div><strong>预计亏损金额: <span id="shortLossAmount">0.00</span> USDT</strong></div>
+    </div>
+    <p>预估爆仓价: <span id="shortLiquidation"></span> USDT</p>
+    <canvas id="shortChart" width="300" height="400"></canvas>
+  </div>
+
+  <!-- 综合信息 -->
+  <div class="section">
+    <h3>综合信息</h3>
+    <div id="result"></div>
+  </div>
+
+  <script>
+    // 🧠 所有 JS 逻辑内联封装
+let longTotalQty = 0, longTotalCost = 0, longMargin = 0, longAvgPrice = 0;
+let shortTotalQty = 0, shortTotalCost = 0, shortMargin = 0, shortAvgPrice = 0;
+let principal = 0, leverage = 1, currentPrice = 0;
+
+// 价格、数量和USDT之间的联动计算函数
+function updatePriceInput(index) {
+  let price = parseFloat(document.getElementById('price' + index).value) || 0;
+  let qty = parseFloat(document.getElementById('qty' + index).value) || 0;
+  if (price > 0 && qty > 0) {
+    document.getElementById('usdt' + index).value = (price * qty).toFixed(2);
+  } else if (price > 0) {
+    let usdt = parseFloat(document.getElementById('usdt' + index).value) || 0;
+    if (usdt > 0) {
+      document.getElementById('qty' + index).value = (usdt / price).toFixed(4);
+    }
+  }
+  updateCalculations();
+}
+
+function updateQtyInput(index) {
+  let price = parseFloat(document.getElementById('price' + index).value) || 0;
+  let qty = parseFloat(document.getElementById('qty' + index).value) || 0;
+  if (price > 0 && qty > 0) {
+    document.getElementById('usdt' + index).value = (price * qty).toFixed(2);
+  }
+  updateCalculations();
+}
+
+function updateUsdtInput(index) {
+  let price = parseFloat(document.getElementById('price' + index).value) || 0;
+  let usdt = parseFloat(document.getElementById('usdt' + index).value) || 0;
+  if (price > 0 && usdt > 0) {
+    document.getElementById('qty' + index).value = (usdt / price).toFixed(4);
+  }
+  updateCalculations();
+}
+
+function updateCalculations() {
+  principal = parseFloat(document.getElementById('principal').value) || 0;
+  currentPrice = parseFloat(document.getElementById('currentPrice').value) || 0;
+  leverage = parseFloat(document.getElementById('leverage').value) || 1;
+  if (leverage <= 0) leverage = 1;
+
+  longTotalQty = longTotalCost = longMargin = 0;
+  shortTotalQty = shortTotalCost = shortMargin = 0;
+
+  for (let i = 1; i <= 5; i++) {
+    let price = parseFloat(document.getElementById('price' + i).value) || 0;
+    let qty = parseFloat(document.getElementById('qty' + i).value) || 0;
+    let usdt = parseFloat(document.getElementById('usdt' + i).value) || 0;
+    let direction = document.getElementById('direction' + i).value;
+    
+    // 确保USDT值与价格和数量一致
+    if (price > 0 && qty > 0) {
+      document.getElementById('usdt' + i).value = (price * qty).toFixed(2);
+      
+      if (direction === "long") {
+        longTotalQty += qty;
+        longTotalCost += price * qty;
+        longMargin += (price * qty) / leverage;
+      } else {
+        shortTotalQty += qty;
+        shortTotalCost += price * qty;
+        shortMargin += (price * qty) / leverage;
+      }
+    }
+  }
+
+  if (longTotalQty > 0) {
+    longAvgPrice = longTotalCost / longTotalQty;
+    let freeMargin = Math.max(principal - longMargin, 0);
+    let liquidation = longAvgPrice - freeMargin / longTotalQty;
+    document.getElementById('longLiquidation').innerText = liquidation.toFixed(4);
+    document.getElementById('longSummary').innerHTML = 
+      `总数量: ${longTotalQty.toFixed(4)}，均价: ${longAvgPrice.toFixed(4)}，保证金: ${longMargin.toFixed(4)}`;
+    document.getElementById('longSection').style.display = "block";
+    syncLongProfitSlider(); syncLongStopSlider();
+    drawLongChart();
+  } else {
+    document.getElementById('longSection').style.display = "none";
+    clearCanvas("longChart");
+  }
+
+  if (shortTotalQty > 0) {
+    shortAvgPrice = shortTotalCost / shortTotalQty;
+    let freeMargin = Math.max(principal - shortMargin, 0);
+    let liquidation = shortAvgPrice + freeMargin / shortTotalQty;
+    document.getElementById('shortLiquidation').innerText = liquidation.toFixed(4);
+    document.getElementById('shortSummary').innerHTML =
+      `总数量: ${shortTotalQty.toFixed(4)}，均价: ${shortAvgPrice.toFixed(4)}，保证金: ${shortMargin.toFixed(4)}`;
+    document.getElementById('shortSection').style.display = "block";
+    syncShortProfitSlider(); syncShortStopSlider();
+    drawShortChart();
+  } else {
+    document.getElementById('shortSection').style.display = "none";
+    clearCanvas("shortChart");
+  }
+
+  // 调用更新结果显示函数
+  updateResultDisplay();
+}
+
+function updateResultDisplay() {
+  // 更新综合信息部分，不重新计算持仓数据
+  let result = `当前价格: ${currentPrice.toFixed(4)}<br>本金: ${principal.toFixed(2)} USDT<br>杠杆: ${leverage}`;
+  if (longTotalQty > 0) {
+    let tp = parseFloat(document.getElementById("longProfitPriceInput").value) || longAvgPrice;
+    let sl = parseFloat(document.getElementById("longStopPriceInput").value) || longAvgPrice;
+    let gain = (tp - longAvgPrice) * longTotalQty;
+    let loss = (longAvgPrice - sl) * longTotalQty;
+    document.getElementById("longProfitAmount").innerText = gain.toFixed(2);
+    document.getElementById("longLossAmount").innerText = loss.toFixed(2);
+    result += `<br><strong>多单</strong>：止盈盈利 ${gain.toFixed(2)}，止损亏损 ${loss.toFixed(2)}`;
+  }
+  if (shortTotalQty > 0) {
+    let tp = parseFloat(document.getElementById("shortProfitPriceInput").value) || shortAvgPrice;
+    let sl = parseFloat(document.getElementById("shortStopPriceInput").value) || shortAvgPrice;
+    let gain = (shortAvgPrice - tp) * shortTotalQty;
+    let loss = (sl - shortAvgPrice) * shortTotalQty;
+    document.getElementById("shortProfitAmount").innerText = gain.toFixed(2);
+    document.getElementById("shortLossAmount").innerText = loss.toFixed(2);
+    result += `<br><strong>空单</strong>：止盈盈利 ${gain.toFixed(2)}，止损亏损 ${loss.toFixed(2)}`;
+  }
+  document.getElementById("result").innerHTML = result;
+}
+
+function syncLongProfitSlider() {
+  let perc = parseFloat(document.getElementById("longProfitSlider").value) || 0;
+  document.getElementById("longProfitPercLabel").innerText = perc.toFixed(1);
+  if (longTotalQty > 0 && longAvgPrice) {
+    let targetPrice = longAvgPrice * (1 + perc / 100);
+    document.getElementById("longProfitPriceInput").value = targetPrice.toFixed(4);
+    let profitAmount = (targetPrice - longAvgPrice) * longTotalQty;
+    document.getElementById("longProfitAmount").innerText = profitAmount.toFixed(2);
+    drawLongChart();
+    updateResultDisplay();
+  }
+}
+function syncLongProfitPriceInput() {
+  let price = parseFloat(document.getElementById("longProfitPriceInput").value) || 0;
+  if (longTotalQty > 0 && longAvgPrice) {
+    let perc = ((price / longAvgPrice) - 1) * 100;
+    perc = Math.max(0, Math.min(perc, 20));
+    document.getElementById("longProfitSlider").value = perc.toFixed(1);
+    document.getElementById("longProfitPercLabel").innerText = perc.toFixed(1);
+    let profitAmount = (price - longAvgPrice) * longTotalQty;
+    document.getElementById("longProfitAmount").innerText = profitAmount.toFixed(2);
+    drawLongChart();
+    updateResultDisplay();
+  }
+}
+function syncLongStopSlider() {
+  let perc = parseFloat(document.getElementById("longStopSlider").value) || 0;
+  document.getElementById("longStopPercLabel").innerText = perc.toFixed(1);
+  if (longTotalQty > 0 && longAvgPrice) {
+    let stopPrice = longAvgPrice * (1 - perc / 100);
+    document.getElementById("longStopPriceInput").value = stopPrice.toFixed(4);
+    let lossAmount = (longAvgPrice - stopPrice) * longTotalQty;
+    document.getElementById("longLossAmount").innerText = lossAmount.toFixed(2);
+    drawLongChart();
+    updateResultDisplay();
+  }
+}
+function syncLongStopPriceInput() {
+  let price = parseFloat(document.getElementById("longStopPriceInput").value) || 0;
+  if (longTotalQty > 0 && longAvgPrice) {
+    let perc = (1 - (price / longAvgPrice)) * 100;
+    perc = Math.max(0, Math.min(perc, 20));
+    document.getElementById("longStopSlider").value = perc.toFixed(1);
+    document.getElementById("longStopPercLabel").innerText = perc.toFixed(1);
+    let lossAmount = (longAvgPrice - price) * longTotalQty;
+    document.getElementById("longLossAmount").innerText = lossAmount.toFixed(2);
+    drawLongChart();
+    updateResultDisplay();
+  }
+}
+
+function syncShortProfitSlider() {
+  let perc = parseFloat(document.getElementById("shortProfitSlider").value) || 0;
+  document.getElementById("shortProfitPercLabel").innerText = perc.toFixed(1);
+  if (shortTotalQty > 0 && shortAvgPrice) {
+    let targetPrice = shortAvgPrice * (1 - perc / 100);
+    document.getElementById("shortProfitPriceInput").value = targetPrice.toFixed(4);
+    let profitAmount = (shortAvgPrice - targetPrice) * shortTotalQty;
+    document.getElementById("shortProfitAmount").innerText = profitAmount.toFixed(2);
+    drawShortChart();
+    updateResultDisplay();
+  }
+}
+function syncShortProfitPriceInput() {
+  let price = parseFloat(document.getElementById("shortProfitPriceInput").value) || 0;
+  if (shortTotalQty > 0 && shortAvgPrice) {
+    let perc = ((shortAvgPrice - price) / shortAvgPrice) * 100;
+    perc = Math.max(0, Math.min(perc, 20));
+    document.getElementById("shortProfitSlider").value = perc.toFixed(1);
+    document.getElementById("shortProfitPercLabel").innerText = perc.toFixed(1);
+    let profitAmount = (shortAvgPrice - price) * shortTotalQty;
+    document.getElementById("shortProfitAmount").innerText = profitAmount.toFixed(2);
+    drawShortChart();
+    updateResultDisplay();
+  }
+}
+function syncShortStopSlider() {
+  let perc = parseFloat(document.getElementById("shortStopSlider").value) || 0;
+  document.getElementById("shortStopPercLabel").innerText = perc.toFixed(1);
+  if (shortTotalQty > 0 && shortAvgPrice) {
+    let stopPrice = shortAvgPrice * (1 + perc / 100);
+    document.getElementById("shortStopPriceInput").value = stopPrice.toFixed(4);
+    let lossAmount = (stopPrice - shortAvgPrice) * shortTotalQty;
+    document.getElementById("shortLossAmount").innerText = lossAmount.toFixed(2);
+    drawShortChart();
+    updateResultDisplay();
+  }
+}
+function syncShortStopPriceInput() {
+  let price = parseFloat(document.getElementById("shortStopPriceInput").value) || 0;
+  if (shortTotalQty > 0 && shortAvgPrice) {
+    let perc = ((price / shortAvgPrice) - 1) * 100;
+    perc = Math.max(0, Math.min(perc, 20));
+    document.getElementById("shortStopSlider").value = perc.toFixed(1);
+    document.getElementById("shortStopPercLabel").innerText = perc.toFixed(1);
+    let lossAmount = (price - shortAvgPrice) * shortTotalQty;
+    document.getElementById("shortLossAmount").innerText = lossAmount.toFixed(2);
+    drawShortChart();
+    updateResultDisplay();
+  }
+}
+
+function drawPriceChart(canvasId, markers) {
+  const canvas = document.getElementById(canvasId);
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d');
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  let prices = markers.map(m => m.price);
+  let max = Math.max(...prices), min = Math.min(...prices);
+  let margin = (max - min) * 0.1 || 1;
+  max += margin; min -= margin;
+  const mapY = p => ((max - p) / (max - min)) * canvas.height;
+
+  ctx.beginPath(); ctx.moveTo(50, 0); ctx.lineTo(50, canvas.height);
+  ctx.strokeStyle = "#666"; ctx.lineWidth = 2; ctx.stroke();
+  ctx.fillStyle = "#000"; ctx.font = "12px Arial";
+  for (let i = 0; i <= 5; i++) {
+    let val = max - i * ((max - min) / 5);
+    let y = mapY(val);
+    ctx.beginPath(); ctx.moveTo(45, y); ctx.lineTo(50, y); ctx.stroke();
+    ctx.fillText(val.toFixed(4), 5, y + 4);
+  }
+  markers.forEach(m => {
+    let y = mapY(m.price);
+    ctx.beginPath(); ctx.moveTo(50, y); ctx.lineTo(canvas.width, y);
+    ctx.strokeStyle = m.color; ctx.lineWidth = 2; ctx.stroke();
+    ctx.fillStyle = m.color; ctx.font = "14px Arial";
+    ctx.fillText(`${m.label} (${m.price.toFixed(2)})`, 60, y - 4);
+  });
+}
+
+function drawLongChart() {
+  if (longTotalQty <= 0) return;
+  drawPriceChart("longChart", [
+    { price: longAvgPrice, label: "入场价", color: "#007bff" },
+    { price: parseFloat(document.getElementById("longProfitPriceInput").value), label: "止盈", color: "#28a745" },
+    { price: parseFloat(document.getElementById("longStopPriceInput").value), label: "止损", color: "#dc3545" },
+    { price: parseFloat(document.getElementById("longLiquidation").innerText), label: "爆仓", color: "#fd7e14" }
+  ]);
+}
+
+function drawShortChart() {
+  if (shortTotalQty <= 0) return;
+  drawPriceChart("shortChart", [
+    { price: shortAvgPrice, label: "入场价", color: "#007bff" },
+    { price: parseFloat(document.getElementById("shortProfitPriceInput").value), label: "止盈", color: "#28a745" },
+    { price: parseFloat(document.getElementById("shortStopPriceInput").value), label: "止损", color: "#dc3545" },
+    { price: parseFloat(document.getElementById("shortLiquidation").innerText), label: "爆仓", color: "#fd7e14" }
+  ]);
+}
+
+function clearCanvas(id) {
+  const canvas = document.getElementById(id);
+  if (canvas) canvas.getContext("2d").clearRect(0, 0, canvas.width, canvas.height);
+}
+
+// 页面初始化
+window.onload = updateCalculations;
+  </script>
+</body>
+</html>
+</script>
